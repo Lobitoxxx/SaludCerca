@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: salud-cerca-backend
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/saludcerca}
+    username: ${POSTGRES_USER:saludcerca}
+    password: ${POSTGRES_PASSWORD:saludcerca123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5
+
+server:
+  port: ${PORT:8080}
+
+# CORS abierto en desarrollo (el frontend React se sirve desde otro puerto).
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}

@@ -26,9 +26,10 @@ flowchart LR
 | Dashboard | HTML autónomo (Leaflet + Chart.js) | ✅ |
 | Motor de derivación | `recomendar_derivacion()` anti-saturación | ✅ |
 | Módulo ML | DBSCAN IPRESS + forecast mensual (estilo Prophet) | ✅ |
-| CI end-to-end | GitHub Actions (`pipeline + QA + tests`) | ✅ |
+| CI end-to-end | GitHub Actions (`pipeline + QA + tests + backend`) | ✅ |
 | Versionado del lakehouse | `MANIFEST.json` por etapa (conteos + commit) | ✅ |
-| API backend / frontend | Spring Boot · React | ⏳ pendiente |
+| API backend | Spring Boot 3.5 · REST + pgvector + PostGIS | ✅ |
+| Frontend | React (mapa interactivo + búsqueda semántica) | ⏳ pendiente |
 
 ## Quick start
 
@@ -56,6 +57,19 @@ python -m pytest ml/tests
 
 # 7. CI (reproduce la validación completa en GitHub Actions)
 #   Ver .github/workflows/ci.yml — requiere repo remoto con Actions habilitado.
+
+# 8. Backend Spring Boot (API REST sobre la capa Gold)
+cd backend
+mvnw.cmd package          # o: sh mvnw package (Linux/macOS)
+java -jar target/backend-1.0.0.jar
+# Endpoints:
+#   GET /api/health
+#   GET /api/ipress/{codigo}
+#   GET /api/ipress/cercanas?lat=-12.05&lon=-77.04&radioKm=50
+#   GET /api/especialidades
+#   GET /api/buscar/ipress?texto=cardiologia
+#   GET /api/buscar/especialidad?texto=corazon
+#   GET /api/derivacion/recomendar?origen=00000002&especialidad=5
 ```
 
 ## Documentación completa
@@ -75,7 +89,8 @@ transaccional y estrella, índices, vistas OLAP, despliegue, QA y roadmap).
 
 ```text
 SaludCerca/
-├── .github/workflows/ci.yml # CI end-to-end (pipeline + QA + tests)
+├── .github/workflows/ci.yml # CI end-to-end (pipeline + QA + tests + backend)
+├── backend/             # API REST Spring Boot (Gold/PostGIS/pgvector)
 ├── data/                # Generador de dataset sintético + embeddings
 ├── data-pipeline/       # Pipeline PySpark (bronze / silver / gold) + MANIFEST + tests
 ├── db/init/             # SQL: extensiones, esquema ODS, estrella, índices, vistas, seed, derivación

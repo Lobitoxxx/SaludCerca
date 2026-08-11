@@ -23,6 +23,7 @@
 14. [Motor de derivación inteligente](#14-motor-de-derivación-inteligente)
 15. [Módulo ML](#15-módulo-ml)
 16. [Gobernanza y CI](#16-gobernanza-y-ci)
+17. [Backend Spring Boot](#17-backend-spring-boot)
 
 ---
 
@@ -652,21 +653,20 @@ El script `06_seed.sql` finaliza con un resumen de filas por tabla:
 
 ```mermaid
 flowchart LR
-    DONE["✅ Construido<br/>Pipeline Medallón + PostGIS + pgvector + estrella + QA + dashboard<br/>+ motor de derivación + módulo ML + CI end-to-end + versionado lakehouse"] --> P1["Backend Spring Boot<br/>REST + SemanticEncoder.java (mismo embedding)"]
-    P1 --> P2["Frontend React<br/>mapa interactivo + búsqueda semántica"]
-    P2 --> P3["Producción<br/>primer commit git · CI/CD activado · orquestación real"]
+    DONE["✅ Construido<br/>Pipeline Medallón + PostGIS + pgvector + estrella + QA + dashboard<br/>+ motor de derivación + módulo ML + CI end-to-end + versionado lakehouse<br/>+ backend Spring Boot"] --> P2["Frontend React<br/>mapa interactivo + búsqueda semántica"]
+    P2 --> P3["Producción<br/>orquestación real (Airflow/Delta)"]
 ```
 
 | Pendiente | Detalle |
 |---|---|
-| **Backend Spring Boot** | API REST sobre la capa Gold; `SemanticEncoder.java` genera los **mismos** embeddings que `embedding_encoder.py` (SHA-1 + módulo) |
 | **Frontend React** | Consumo de la API; búsqueda semántica pgvector y geo-referencia |
-| **Producción / Gobernanza** | Primer commit git (rama `master` aún sin historial) y orquestación real (Airflow/Delta) |
+| **Producción / Gobernanza** | Orquestación real (Airflow/Delta) |
 
 **Construido:** motor de derivación (sección 14), módulo ML (sección 15:
-DBSCAN de IPRESS + forecast mensual sobre la capa Silver) y gobernanza (sección
-16: CI end-to-end en GitHub Actions + MANIFEST de versionado del lakehouse).
-El **primer commit** está pendiente de autorización explícita.
+DBSCAN de IPRESS + forecast mensual sobre la capa Silver), gobernanza (sección
+16: CI end-to-end en GitHub Actions + MANIFEST de versionado del lakehouse) y
+backend Spring Boot (sección 17: API REST sobre la capa Gold). El **primer
+commit** está publicado en GitHub (`master`).
 
 ---
 
@@ -824,6 +824,58 @@ flowchart LR
 
 ---
 
+## 17. Backend Spring Boot
+
+API REST sobre la capa Gold (`backend/`, Java 17 + Spring Boot 3.5.x) que
+convierte el lakehouse en un servicio consumible por el frontend React.
+
+```mermaid
+flowchart LR
+    API["API REST :8080"] --> H["Health"]
+    API --> I["/api/ipress<br/>detalle + cercanas (PostGIS)"]
+    API --> E["/api/especialidades"]
+    API --> B["/api/buscar<br/>semántico pgvector"]
+    API --> D["/api/derivacion<br/>motor anti-saturación"]
+    B --> SEM["SemanticEncoder.java<br/>= embedding_encoder.py (SHA-1 + módulo)"]
+    SEM --> PG["pgvector HNSW<br/>cosine <=>"]
+    I --> PG2["PostGIS ST_DWithin"]
+    D --> F["recomendar_derivacion()"]
+```
+
+### 17.1 Endpoints
+
+| Método / Ruta | Descripción |
+|---|---|
+| `GET /api/health` | Estado de la API y de la conexión a la capa Gold |
+| `GET /api/ipress/{codigo}` | Detalle de una IPRESS (categoría, nivel, geom, capacidad) |
+| `GET /api/ipress/cercanas?lat&lon&radioKm&limite` | IPRESS ACTIVAS en un radio, ordenadas por distancia real (geography) |
+| `GET /api/especialidades` | Catálogo de especialidades médicas |
+| `GET /api/buscar/ipress?texto&topK` | Búsqueda semántica pgvector sobre `ipress.descripcion_emb` |
+| `GET /api/buscar/especialidad?texto&topK` | Búsqueda semántica sobre `especialidades.descripcion_emb` |
+| `GET /api/derivacion/recomendar?origen&especialidad&fecha&topN` | Invoca `recomendar_derivacion()` (score 0-100) |
+
+### 17.2 Reproducibilidad del embedding
+
+`SemanticEncoder.java` implementa **exactamente** el algoritmo de
+`data/embedding_encoder.py` (normalización NFKD → n-gramas n=1..4 → `SHA-1`
+de 4 bytes como uint32 → `v[h % 384] += ±1` → L2). El test
+`SemanticEncoderTest` verifica los **mismos valores de referencia que Python**
+(componentes del vector, similitudes coseno y normalización): 4/4 tests verdes.
+Esto garantiza que las consultas del backend usan el mismo espacio vectorial
+que los embeddings persistidos por el pipeline.
+
+### 17.3 Build y ejecución
+
+```bash
+cd backend
+sh mvnw package            # Maven Wrapper 3.9.16 (no requiere Maven instalado)
+java -jar target/backend-1.0.0.jar
+```
+
+El CI compila el backend en un job independiente (`sh mvnw -B -ntp package`).
+
+---
+
 ## Apéndice: estructura del repositorio
 
 ```text
@@ -832,7 +884,16 @@ SaludCerca/
 ├── Dockerfile.db               # Imagen base postgis + paquete pgvector
 ├── .gitignore
 ├── .github/workflows/
-│   └── ci.yml                  # CI end-to-end (pipeline + QA + tests)
+│   └── ci.yml                  # CI end-to-end (pipeline + QA + tests + backend)
+├── backend/                    # API REST Spring Boot (Gold / PostGIS / pgvector)
+│   ├── pom.xml                 # Spring Boot 3.5.16, Java 17
+│   ├── mvnw / mvnw.cmd         # Maven Wrapper 3.9.16 (build reproducible)
+│   └── src/main/java/pe/saludcerca/backend/
+│       ├── SaludCercaBackendApplication.java
+│       ├── config/CorsConfig.java
+│       ├── semantic/SemanticEncoder.java   # Espejo Java de embedding_encoder.py
+│       ├── service/            # IpressService, DerivacionService, BusquedaService
+│       └── web/                # Controllers REST + DTOs (records)
 ├── data/
 │   ├── generate_seed.py        # Generador de dataset sintético (seed=42)
 │   ├── embedding_encoder.py    # Embeddings determinísticos 384d (pgvector)
