@@ -1,0 +1,13 @@
+# ============================================================================
+# Imagen de base de datos para SALUD CERCA
+# ----------------------------------------------------------------------------
+# Combina las tres extensiones geo-espaciales/semánticas requeridas:
+#   - PostGIS 3.4 (datos espaciales / índices GIST)
+#   - pgvector  (búsqueda semántica / índices HNSW)
+# Base: imagen oficial postgis sobre Debian, + paquete pgvector de PGDG.
+# ============================================================================
+FROM postgis/postgis:16-3.4
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-16-pgvector \
+    && rm -rf /var/lib/apt/lists/*

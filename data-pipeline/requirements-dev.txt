@@ -1,0 +1,2 @@
+# Dependencias de desarrollo (tests) del pipeline
+pytest>=8.0

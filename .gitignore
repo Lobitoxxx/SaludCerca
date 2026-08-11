@@ -1,0 +1,38 @@
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# --- Datos generados ---
+data/output/
+data/raw/
+data/lakehouse/
+
+# --- Java / Spring Boot ---
+backend/target/
+*.class
+
+# --- Node / React ---
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# --- ML ---
+ml/models/
+*.pkl
+ml/output/
+
+# --- Graphify ---
+graphify-out/
+
+# --- IDE / SO ---
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log

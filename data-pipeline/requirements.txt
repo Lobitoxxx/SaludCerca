@@ -1,0 +1,7 @@
+# ============================================================================
+# SALUD CERCA - Pipeline Big Data (PySpark)
+# Dependencias del entorno de procesamiento distribuido.
+# ============================================================================
+pyspark==3.5.5
+pandas>=2.0
+pyarrow>=15.0

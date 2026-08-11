@@ -1,0 +1,101 @@
+# ============================================================================
+# SALUD CERCA - CI (GitHub Actions)
+# ----------------------------------------------------------------------------
+# Reproduce la validación completa del proyecto sobre un runner limpio:
+#   1. Genera el dataset sintético (350.000 atenciones HIS)
+#   2. Levanta PostgreSQL + PostGIS + pgvector (contenedor docker compose)
+#   3. Ejecuta el pipeline Medallón (bronze -> silver -> gold)
+#   4. QA: reglas de negocio Gold + motor de derivación + idempotencia
+#   5. Tests de unidad (pipeline, ML y derivación contra BD real)
+#   6. Regenera el dashboard y verifica el MANIFEST del lakehouse
+# ============================================================================
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline-completo:
+    name: Pipeline + QA + tests (end-to-end)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17 (Spark)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r data-pipeline/requirements.txt
+          pip install -r ml/requirements-ml.txt
+          pip install pytest
+
+      - name: Generar dataset sintético (350.000 atenciones)
+        run: python data/generate_seed.py --rows 350000
+
+      - name: Descargar driver JDBC de PostgreSQL (si falta)
+        run: |
+          if [ ! -f data-pipeline/lib/postgresql-42.7.4.jar ]; then
+            curl -fsSL -o data-pipeline/lib/postgresql-42.7.4.jar \
+              https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
+          fi
+
+      - name: Levantar PostgreSQL + PostGIS + pgvector
+        run: docker compose up -d --build db
+
+      - name: Esperar a que la base esté healthy
+        run: |
+          for i in $(seq 1 60); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' saludcerca-db 2>/dev/null)" = "healthy" ]; then
+              echo "Base lista (intento $i)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "La base no alcanzó el estado healthy"; exit 1
+
+      - name: Pipeline Medallón (bronze + silver + gold)
+        run: |
+          cd data-pipeline
+          python main.py --stage bronze
+          python main.py --stage silver
+          python main.py --stage gold
+
+      - name: QA de datos (Gold + derivación)
+        run: |
+          python qa/run_qa.py
+          python qa/run_qa_derivaciones.py
+
+      - name: Idempotencia (re-ejecuta pipeline + Gold estable)
+        run: python qa/test_idempotencia.py
+
+      - name: Tests de unidad (pipeline + ML + derivación)
+        run: |
+          cd data-pipeline
+          python -m pytest tests -q
+          python -m pytest ../ml/tests -q
+
+      - name: Regenerar dashboard
+        run: python dashboard/generar_dashboard.py
+
+      - name: Verificar MANIFEST del lakehouse
+        run: python -c "import json; m=json.load(open('data/lakehouse/MANIFEST.json')); print(json.dumps(m, ensure_ascii=False, indent=2))"
+
+      - name: Comprobar artefactos de ML
+        run: |
+          test -f data/lakehouse/ml/clusters_ipress.csv || (echo "Falta clusters_ipress.csv"; exit 1)
+          test -f data/lakehouse/ml/forecast_atenciones_total.csv || (echo "Falta forecast"; exit 1)

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SALUD CERCA - Dashboard geo-analítico</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root { --sc:#0d6e8e; --sc2:#18a0b0; }
+  body { background:#f4f7f9; font-family:Segoe UI, Roboto, sans-serif; }
+  header { background:linear-gradient(90deg, var(--sc), var(--sc2)); color:#fff; padding:1.2rem 1.5rem; }
+  header h1 { margin:0; font-weight:600; font-size:1.4rem; }
+  header small { opacity:.9; }
+  .kpi { background:#fff; border-radius:12px; padding:1rem 1.2rem; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .kpi .valor { font-size:1.7rem; font-weight:700; color:var(--sc); }
+  .kpi .etiqueta { font-size:.78rem; color:#6c757d; text-transform:uppercase; letter-spacing:.4px; }
+  .panel { background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:1rem; }
+  .panel h2 { font-size:1rem; font-weight:600; color:#333; margin-bottom:.8rem; }
+  #mapa { height:440px; border-radius:12px; z-index:1; }
+  table { font-size:.85rem; }
+  .footer { color:#8a94a6; font-size:.8rem; text-align:center; padding:1rem 0 2rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SALUD CERCA &mdash; Dashboard geo-analítico de cobertura sanitaria</h1>
+  <small>Lakehouse Medallón &middot; PySpark &middot; PostgreSQL + PostGIS + pgvector &middot; generado: 2026-08-11 11:14</small>
+</header>
+
+<main class="container-fluid px-4 py-4">
+
+  <!-- KPIs -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3"><div class="kpi"><div class="valor">1.844</div><div class="etiqueta">Establecimientos</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi"><div class="valor">1.649</div><div class="etiqueta">IPRESS activas</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi"><div class="valor">349.887</div><div class="etiqueta">Atenciones HIS 2024</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi"><div class="valor">21</div><div class="etiqueta">Desiertos sanitarios</div></div></div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Mapa -->
+    <div class="col-lg-8">
+      <div class="panel"><h2>Cobertura por departamento (radio = IPRESS, color = saturación promedio)</h2>
+        <div id="mapa"></div>
+      </div>
+    </div>
+    <!-- Serie mensual -->
+    <div class="col-lg-4">
+      <div class="panel"><h2>Tendencia mensual de atenciones</h2>
+        <canvas id="graficaSerie"></canvas>
+      </div>
+      <div class="panel mt-3"><h2>Top 10 IPRESS saturadas</h2>
+        <table class="table table-sm"><thead><tr><th>Establecimiento</th><th class="text-end">Saturación %</th></tr></thead>
+        <tbody id="tablaSaturadas"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-0">
+    <div class="col-lg-7">
+      <div class="panel"><h2>IPRESS por departamento</h2><canvas id="graficaCobertura" height="120"></canvas></div>
+    </div>
+    <div class="col-lg-5">
+      <div class="panel"><h2>Peores brechas de cobertura (km a la IPRESS activa más cercana)</h2>
+        <table class="table table-sm"><thead><tr><th>Distrito</th><th class="text-end">Km</th><th>Brecha</th></tr></thead>
+        <tbody id="tablaBrechas"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">Datos sintéticos 2024 &middot; RENIPRESS + HIS-MINSA &middot; modelos: Star Schema / Geo-analítica / pgvector</div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+const DATOS = {"kpis": {"total_ipress": 1844, "activas": 1649, "atenciones": 349887, "atenciones_fact": 349887, "fact_filas": 181300, "desiertos": 21, "deficit": 427}, "cobertura": [{"departamento": "CALLAO", "total_ipress": 342, "activas": 309, "nivel_primario": 210, "nivel_secundario": 105, "nivel_terciario": 27, "saturacion": 26.34, "indice_cobertura": 2923.08, "lat": -11.959334533785352, "lon": -77.14131753981127}, {"departamento": "LIMA", "total_ipress": 326, "activas": 292, "nivel_primario": 201, "nivel_secundario": 100, "nivel_terciario": 25, "saturacion": 26.34, "indice_cobertura": 310.45, "lat": -12.052712172050168, "lon": -76.99718473068637}, {"departamento": "AREQUIPA", "total_ipress": 98, "activas": 87, "nivel_primario": 82, "nivel_secundario": 14, "nivel_terciario": 2, "saturacion": 31.77, "indice_cobertura": 646.44, "lat": -16.321163133519907, "lon": -71.59351806526256}, {"departamento": "LA LIBERTAD", "total_ipress": 91, "activas": 78, "nivel_primario": 82, "nivel_secundario": 9, "nivel_terciario": 0, "saturacion": 35.3, "indice_cobertura": 438.77, "lat": -8.119942863821368, "lon": -78.99892069120341}, {"departamento": "PIURA", "total_ipress": 84, "activas": 75, "nivel_primario": 74, "nivel_secundario": 10, "nivel_terciario": 0, "saturacion": 34.8, "indice_cobertura": 397.54, "lat": -5.1706898367887275, "lon": -80.54970344272675}, {"departamento": "LAMBAYEQUE", "total_ipress": 79, "activas": 74, "nivel_primario": 74, "nivel_secundario": 5, "nivel_terciario": 0, "saturacion": 37.08, "indice_cobertura": 600.3, "lat": -6.648669809855434, "lon": -79.87363721727986}, {"departamento": "CUSCO", "total_ipress": 76, "activas": 66, "nivel_primario": 75, "nivel_secundario": 1, "nivel_terciario": 0, "saturacion": 40.77, "indice_cobertura": 546.76, "lat": -13.453969891007585, "lon": -71.91540265630613}, {"departamento": "JUNIN", "total_ipress": 66, "activas": 59, "nivel_primario": 55, "nivel_secundario": 11, "nivel_terciario": 0, "saturacion": 33.07, "indice_cobertura": 475.16, "lat": -11.66672139209867, "lon": -75.628188513712}, {"departamento": "PUNO", "total_ipress": 65, "activas": 60, "nivel_primario": 58, "nivel_secundario": 7, "nivel_terciario": 0, "saturacion": 35.79, "indice_cobertura": 563.75, "lat": -15.925959097989766, "lon": -70.05264319829737}, {"departamento": "CAJAMARCA", "total_ipress": 64, "activas": 54, "nivel_primario": 62, "nivel_secundario": 2, "nivel_terciario": 0, "saturacion": 40.24, "indice_cobertura": 460.43, "lat": -7.187327451186113, "lon": -78.46804015106395}, {"departamento": "ICA", "total_ipress": 50, "activas": 46, "nivel_primario": 46, "nivel_secundario": 4, "nivel_terciario": 0, "saturacion": 38.64, "indice_cobertura": 511.77, "lat": -14.129970820435068, "lon": -75.7000721509882}, {"departamento": "SAN MARTIN", "total_ipress": 48, "activas": 46, "nivel_primario": 47, "nivel_secundario": 1, "nivel_terciario": 0, "saturacion": 41.39, "indice_cobertura": 510.64, "lat": -6.381928233511732, "lon": -76.41116997753959}, {"departamento": "HUANUCO", "total_ipress": 46, "activas": 41, "nivel_primario": 43, "nivel_secundario": 3, "nivel_terciario": 0, "saturacion": 38.99, "indice_cobertura": 596.63, "lat": -9.930838210574255, "lon": -76.35805040139657}, {"departamento": "ANCASH", "total_ipress": 46, "activas": 42, "nivel_primario": 43, "nivel_secundario": 3, "nivel_terciario": 0, "saturacion": 37.24, "indice_cobertura": 388.19, "lat": -9.471686347291616, "lon": -77.54485164802165}, {"departamento": "LORETO", "total_ipress": 41, "activas": 37, "nivel_primario": 40, "nivel_secundario": 1, "nivel_terciario": 0, "saturacion": 40.36, "indice_cobertura": 399.22, "lat": -3.719993004280089, "lon": -73.16997503229635}, {"departamento": "AMAZONAS", "total_ipress": 39, "activas": 34, "nivel_primario": 39, "nivel_secundario": 0, "nivel_terciario": 0, "saturacion": 43.96, "indice_cobertura": 915.49, "lat": -6.267622380904668, "lon": -77.85094353417152}, {"departamento": "AYACUCHO", "total_ipress": 39, "activas": 37, "nivel_primario": 37, "nivel_secundario": 2, "nivel_terciario": 0, "saturacion": 39.2, "indice_cobertura": 583.83, "lat": -13.134063667761735, "lon": -74.17027350349062}, {"departamento": "TACNA", "total_ipress": 36, "activas": 32, "nivel_primario": 35, "nivel_secundario": 1, "nivel_terciario": 0, "saturacion": 41.34, "indice_cobertura": 932.64, "lat": -17.871254574963736, "lon": -70.30240264046553}, {"departamento": "APURIMAC", "total_ipress": 33, "activas": 29, "nivel_primario": 32, "nivel_secundario": 1, "nivel_terciario": 0, "saturacion": 39.92, "indice_cobertura": 789.47, "lat": -13.71835463059893, "lon": -73.05531963613434}, {"departamento": "MADRE DE DIOS", "total_ipress": 33, "activas": 28, "nivel_primario": 33, "nivel_secundario": 0, "nivel_terciario": 0, "saturacion": 41.94, "indice_cobertura": 1864.41, "lat": -12.632451043194234, "lon": -69.84492969261672}, {"departamento": "UCAYALI", "total_ipress": 30, "activas": 26, "nivel_primario": 30, "nivel_secundario": 0, "nivel_terciario": 0, "saturacion": 43.09, "indice_cobertura": 486.22, "lat": -8.506749075851399, "lon": -74.5354842058826}, {"departamento": "HUANCAVELICA", "total_ipress": 29, "activas": 24, "nivel_primario": 29, "nivel_secundario": 0, "nivel_terciario": 0, "saturacion": 43.92, "indice_cobertura": 833.33, "lat": -12.724298901276258, "lon": -74.93983145802525}, {"departamento": "PASCO", "total_ipress": 29, "activas": 26, "nivel_primario": 29, "nivel_secundario": 0, "nivel_terciario": 0, "saturacion": 43.62, "indice_cobertura": 1066.18, "lat": -10.729335204951829, "lon": -75.28975384250361}, {"departamento": "TUMBES", "total_ipress": 27, "activas": 26, "nivel_primario": 27, "nivel_secundario": 0, "nivel_terciario": 0, "saturacion": 41.61, "indice_cobertura": 1030.53, "lat": -3.574182586798711, "lon": -80.48847640131999}, {"departamento": "MOQUEGUA", "total_ipress": 27, "activas": 21, "nivel_primario": 26, "nivel_secundario": 1, "nivel_terciario": 0, "saturacion": 41.26, "indice_cobertura": 1343.28, "lat": -17.36523710652771, "lon": -70.91286023342106}], "serie": [{"mes": "2024-01", "atenciones": 29870, "emergencias": 1365}, {"mes": "2024-02", "atenciones": 27728, "emergencias": 1422}, {"mes": "2024-03", "atenciones": 29549, "emergencias": 1391}, {"mes": "2024-04", "atenciones": 28849, "emergencias": 1314}, {"mes": "2024-05", "atenciones": 29763, "emergencias": 1411}, {"mes": "2024-06", "atenciones": 28512, "emergencias": 1432}, {"mes": "2024-07", "atenciones": 29642, "emergencias": 1387}, {"mes": "2024-08", "atenciones": 29569, "emergencias": 1425}, {"mes": "2024-09", "atenciones": 28571, "emergencias": 1367}, {"mes": "2024-10", "atenciones": 29628, "emergencias": 1444}, {"mes": "2024-11", "atenciones": 28892, "emergencias": 1353}, {"mes": "2024-12", "atenciones": 29314, "emergencias": 1372}], "saturadas": [{"nombre": "PUESTO DE SALUD AYACUCHO 03 03 19", "saturacion": 49.96, "atenciones": 24}, {"nombre": "PUESTO DE SALUD APURIMAC 02 04 34", "saturacion": 49.82, "atenciones": 97}, {"nombre": "PUESTO DE SALUD LIMA 03 10 02", "saturacion": 49.63, "atenciones": 24}, {"nombre": "PUESTO DE SALUD CAJAMARCA 03 05 04", "saturacion": 49.47, "atenciones": 97}, {"nombre": "PUESTO DE SALUD HUANUCO 03 07 62", "saturacion": 49.37, "atenciones": 24}, {"nombre": "PUESTO DE SALUD PUNO 05 05 53", "saturacion": 49.12, "atenciones": 48}, {"nombre": "PUESTO DE SALUD LORETO 03 03 09", "saturacion": 49.05, "atenciones": 73}, {"nombre": "PUESTO DE SALUD ICA 03 07 69", "saturacion": 49.05, "atenciones": 48}, {"nombre": "PUESTO DE SALUD CUSCO 02 05 51", "saturacion": 49.05, "atenciones": 97}, {"nombre": "PUESTO DE SALUD AYACUCHO 01 01 84", "saturacion": 49.03, "atenciones": 73}], "brechas": [{"departamento": "AMAZONAS", "brecha": "COBERTURA_ACEPTABLE", "n": 5}, {"departamento": "AMAZONAS", "brecha": "DEFICIT_MODERADO", "n": 19}, {"departamento": "AMAZONAS", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "ANCASH", "brecha": "COBERTURA_ACEPTABLE", "n": 8}, {"departamento": "ANCASH", "brecha": "DEFICIT_MODERADO", "n": 23}, {"departamento": "APURIMAC", "brecha": "COBERTURA_ACEPTABLE", "n": 5}, {"departamento": "APURIMAC", "brecha": "DEFICIT_MODERADO", "n": 16}, {"departamento": "APURIMAC", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "AREQUIPA", "brecha": "COBERTURA_ACEPTABLE", "n": 34}, {"departamento": "AREQUIPA", "brecha": "DEFICIT_MODERADO", "n": 19}, {"departamento": "AREQUIPA", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "AYACUCHO", "brecha": "COBERTURA_ACEPTABLE", "n": 9}, {"departamento": "AYACUCHO", "brecha": "DEFICIT_MODERADO", "n": 16}, {"departamento": "AYACUCHO", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "CAJAMARCA", "brecha": "COBERTURA_ACEPTABLE", "n": 19}, {"departamento": "CAJAMARCA", "brecha": "DEFICIT_MODERADO", "n": 16}, {"departamento": "CALLAO", "brecha": "COBERTURA_ACEPTABLE", "n": 120}, {"departamento": "CALLAO", "brecha": "DEFICIT_MODERADO", "n": 4}, {"departamento": "CUSCO", "brecha": "COBERTURA_ACEPTABLE", "n": 18}, {"departamento": "CUSCO", "brecha": "DEFICIT_MODERADO", "n": 23}, {"departamento": "CUSCO", "brecha": "DESIERTO_SANITARIO", "n": 3}, {"departamento": "HUANCAVELICA", "brecha": "COBERTURA_ACEPTABLE", "n": 1}, {"departamento": "HUANCAVELICA", "brecha": "DEFICIT_MODERADO", "n": 16}, {"departamento": "HUANCAVELICA", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "HUANUCO", "brecha": "COBERTURA_ACEPTABLE", "n": 6}, {"departamento": "HUANUCO", "brecha": "DEFICIT_MODERADO", "n": 23}, {"departamento": "HUANUCO", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "ICA", "brecha": "COBERTURA_ACEPTABLE", "n": 5}, {"departamento": "ICA", "brecha": "DEFICIT_MODERADO", "n": 23}, {"departamento": "JUNIN", "brecha": "COBERTURA_ACEPTABLE", "n": 16}, {"departamento": "JUNIN", "brecha": "DEFICIT_MODERADO", "n": 23}, {"departamento": "JUNIN", "brecha": "DESIERTO_SANITARIO", "n": 2}, {"departamento": "LA LIBERTAD", "brecha": "COBERTURA_ACEPTABLE", "n": 29}, {"departamento": "LA LIBERTAD", "brecha": "DEFICIT_MODERADO", "n": 17}, {"departamento": "LA LIBERTAD", "brecha": "DESIERTO_SANITARIO", "n": 2}, {"departamento": "LAMBAYEQUE", "brecha": "COBERTURA_ACEPTABLE", "n": 22}, {"departamento": "LAMBAYEQUE", "brecha": "DEFICIT_MODERADO", "n": 20}, {"departamento": "LIMA", "brecha": "COBERTURA_ACEPTABLE", "n": 126}, {"departamento": "LORETO", "brecha": "COBERTURA_ACEPTABLE", "n": 6}, {"departamento": "LORETO", "brecha": "DEFICIT_MODERADO", "n": 19}, {"departamento": "LORETO", "brecha": "DESIERTO_SANITARIO", "n": 2}, {"departamento": "MADRE DE DIOS", "brecha": "COBERTURA_ACEPTABLE", "n": 7}, {"departamento": "MADRE DE DIOS", "brecha": "DEFICIT_MODERADO", "n": 13}, {"departamento": "MOQUEGUA", "brecha": "COBERTURA_ACEPTABLE", "n": 3}, {"departamento": "MOQUEGUA", "brecha": "DEFICIT_MODERADO", "n": 15}, {"departamento": "MOQUEGUA", "brecha": "DESIERTO_SANITARIO", "n": 2}, {"departamento": "PASCO", "brecha": "COBERTURA_ACEPTABLE", "n": 6}, {"departamento": "PASCO", "brecha": "DEFICIT_MODERADO", "n": 11}, {"departamento": "PASCO", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "PIURA", "brecha": "COBERTURA_ACEPTABLE", "n": 23}, {"departamento": "PIURA", "brecha": "DEFICIT_MODERADO", "n": 18}, {"departamento": "PIURA", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "PUNO", "brecha": "COBERTURA_ACEPTABLE", "n": 15}, {"departamento": "PUNO", "brecha": "DEFICIT_MODERADO", "n": 24}, {"departamento": "SAN MARTIN", "brecha": "COBERTURA_ACEPTABLE", "n": 13}, {"departamento": "SAN MARTIN", "brecha": "DEFICIT_MODERADO", "n": 17}, {"departamento": "TACNA", "brecha": "COBERTURA_ACEPTABLE", "n": 8}, {"departamento": "TACNA", "brecha": "DEFICIT_MODERADO", "n": 17}, {"departamento": "TACNA", "brecha": "DESIERTO_SANITARIO", "n": 1}, {"departamento": "TUMBES", "brecha": "COBERTURA_ACEPTABLE", "n": 1}, {"departamento": "TUMBES", "brecha": "DEFICIT_MODERADO", "n": 18}, {"departamento": "UCAYALI", "brecha": "COBERTURA_ACEPTABLE", "n": 4}, {"departamento": "UCAYALI", "brecha": "DEFICIT_MODERADO", "n": 17}, {"departamento": "UCAYALI", "brecha": "DESIERTO_SANITARIO", "n": 1}], "top_brechas": [{"distrito": "MOQUEGUA / MOQUEGUA 01 / MOQUEGUA 01 06", "km": 31.75, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "LORETO / LORETO 03 / LORETO 03 02", "km": 26.33, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "LORETO / LORETO 01 / LORETO 01 05", "km": 25.8, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "JUNIN / JUNIN 04 / JUNIN 04 03", "km": 25.26, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "APURIMAC / APURIMAC 02 / APURIMAC 02 03", "km": 21, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "CUSCO / CUSCO 03 / CUSCO 03 01", "km": 18.04, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "HUANCAVELICA / HUANCAVELICA 03 / HUANCAVELICA 03 04", "km": 17.96, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "MOQUEGUA / MOQUEGUA 02 / MOQUEGUA 02 01", "km": 17.93, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "UCAYALI / UCAYALI 01 / UCAYALI 01 06", "km": 17.2, "brecha": "DESIERTO_SANITARIO"}, {"distrito": "AMAZONAS / AMAZONAS 03 / AMAZONAS 03 03", "km": 17.16, "brecha": "DESIERTO_SANITARIO"}], "generado": "2026-08-11 11:14"};
+
+// ---------- Mapa ----------
+const mapa = L.map('mapa');
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO'
+}).addTo(mapa);
+
+const marcadores = [];
+const colorSat = (s) => {
+  if (s == null) return '#9aa4af';
+  if (s < 33) return '#2e9e6b';
+  if (s < 66) return '#e6a23c';
+  return '#d64545';
+};
+DATOS.cobertura.forEach(d => {
+  if (d.lat == null || d.lon == null) return;
+  const m = L.circleMarker([d.lat, d.lon], {
+    radius: Math.max(6, Math.sqrt(d.total_ipress || 0) * 2.2),
+    color: '#fff', weight: 1, fillColor: colorSat(d.saturacion), fillOpacity: .85
+  }).addTo(mapa);
+  m.bindTooltip(
+    `<b>${d.departamento}</b><br>` +
+    `IPRESS: ${d.total_ipress} (${d.activas} activas)<br>` +
+    `Saturación prom: ${d.saturacion ?? 'n/d'}%<br>` +
+    `Índice cobertura: ${d.indice_cobertura ?? 'n/d'}/10k hab`
+  );
+  marcadores.push(m);
+});
+if (marcadores.length) mapa.fitBounds(L.featureGroup(marcadores).getBounds().pad(0.1));
+else mapa.setView([-9.19, -75.01], 5);
+
+// ---------- Serie mensual ----------
+new Chart(document.getElementById('graficaSerie'), {
+  type: 'line',
+  data: {
+    labels: DATOS.serie.map(s => s.mes),
+    datasets: [
+      { label: 'Atenciones', data: DATOS.serie.map(s => s.atenciones), borderColor: '#0d6e8e', tension: .3, fill: false },
+      { label: 'Emergencias', data: DATOS.serie.map(s => s.emergencias), borderColor: '#d64545', tension: .3, fill: false }
+    ]
+  },
+  options: { responsive: true, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+});
+
+// ---------- IPRESS por departamento ----------
+const topDept = DATOS.cobertura.slice(0, 12).reverse();
+new Chart(document.getElementById('graficaCobertura'), {
+  type: 'bar',
+  data: {
+    labels: topDept.map(d => d.departamento),
+    datasets: [{
+      label: 'IPRESS totales', data: topDept.map(d => d.total_ipress), backgroundColor: '#18a0b0'
+    }, {
+      label: 'Activas', data: topDept.map(d => d.activas), backgroundColor: '#2e9e6b'
+    }]
+  },
+  options: { indexAxis: 'y', responsive: true, plugins: { legend: { position: 'bottom' } } }
+});
+
+// ---------- Tabla de IPRESS saturadas ----------
+document.getElementById('tablaSaturadas').innerHTML = DATOS.saturadas.map(d =>
+  `<tr><td>${d.nombre}</td><td class="text-end"><b>${d.saturacion}</b></td></tr>`
+).join('') || '<tr><td colspan="2">Sin datos</td></tr>';
+
+// ---------- Tabla de brechas ----------
+document.getElementById('tablaBrechas').innerHTML = DATOS.top_brechas.map(d =>
+  `<tr><td>${d.distrito}</td><td class="text-end"><b>${d.km}</b> km</td><td>${d.brecha}</td></tr>`
+).join('') || '<tr><td colspan="3">Sin datos</td></tr>';
+</script>
+</body>
+</html>

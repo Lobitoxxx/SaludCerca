@@ -1,0 +1,44 @@
+# ============================================================================
+# SALUD CERCA - Infraestructura de datos (Data Lakehouse / OLAP)
+# ----------------------------------------------------------------------------
+# Levanta PostgreSQL 16 + PostGIS 3.4 + pgvector en un solo contenedor,
+# con los scripts de esquema (Medallón Gold + Modelo Estrella) ejecutándose
+# automáticamente en el primer arranque (directorio db/init).
+#
+#   Uso:
+#     python data/generate_seed.py          # 1. Genera dataset sintético
+#     docker compose up -d --build db       # 2. Levanta BD + esquema + seed
+#     docker compose logs -f db             # 3. Verifica arranque
+# ============================================================================
+
+services:
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    container_name: saludcerca-db
+    environment:
+      POSTGRES_USER: saludcerca
+      POSTGRES_PASSWORD: saludcerca123
+      POSTGRES_DB: saludcerca
+      # Zona horaria peruana (UTC-5)
+      TZ: America/Lima
+      PGTZ: America/Lima
+    ports:
+      - "5432:5432"
+    volumes:
+      # Datos persistentes de la instancia
+      - pgdata:/var/lib/postgresql/data
+      # Scripts de esquema ejecutados UNA VEZ en el primer arranque (orden alfabético)
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      # Datasets sintéticos generados por data/generate_seed.py (montados para seed)
+      - ./data/output:/seed-data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saludcerca -d saludcerca"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+volumes:
+  pgdata:
