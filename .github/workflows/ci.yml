@@ -92,6 +92,9 @@ jobs:
       - name: Regenerar dashboard
         run: python dashboard/generar_dashboard.py
 
+      - name: Ejecutar módulo ML (DBSCAN + forecast)
+        run: python ml/main.py
+
       - name: Verificar MANIFEST del lakehouse
         run: python -c "import json; m=json.load(open('data/lakehouse/MANIFEST.json')); print(json.dumps(m, ensure_ascii=False, indent=2))"
 
