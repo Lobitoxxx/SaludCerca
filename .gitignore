@@ -9,6 +9,7 @@ venv/
 data/output/
 data/raw/
 data/lakehouse/
+data-mining/data/
 
 # --- Java / Spring Boot ---
 backend/target/
@@ -24,8 +25,14 @@ ml/models/
 *.pkl
 ml/output/
 
-# --- Graphify ---
-graphify-out/
+# --- Graphify (se versiona solo reporte + grafo) ---
+graphify-out/*
+!graphify-out/GRAPH_REPORT.md
+!graphify-out/graph.json
+
+# --- Obsidian (vault versionado, config de workspace no) ---
+.obsidian/workspace*
+
 
 # --- IDE / SO ---
 .idea/
@@ -36,3 +43,13 @@ Thumbs.db
 
 # --- Logs ---
 *.log
+
+# Valhalla tiles y OSM PBF (pesados, regenerables)
+valhalla_data/
+data/osm/
+
+# Logs temporales locales
+api.log
+api.err.log
+valhalla-build.log
+valhalla-build.err
