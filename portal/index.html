@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SaludCerca — Encuentra atención de salud cerca de ti</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  html, body { height: 100%; margin: 0; }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+  .topbar { background: #0d6efd; color: white; padding: .6rem 1rem; }
+  .topbar h1 { font-size: 1.15rem; margin: 0; font-weight: 700; }
+  .main { display: flex; flex: 1; min-height: 0; }
+  #panel { width: 380px; overflow-y: auto; padding: 1rem; border-right: 1px solid #dee2e6; background: #f8f9fa; }
+  #mapa { flex: 1; }
+  .card-est { cursor: pointer; border-left: 4px solid #adb5bd; }
+  .card-est:hover { background: #eef5ff; }
+  .badge-tipo { font-size: .68rem; }
+  .dist { font-weight: 700; color: #0d6efd; }
+  .chip { margin: 0 .25rem .25rem 0; }
+  .spinner-border-sm { width: 1rem; height: 1rem; }
+  @media (max-width: 768px) {
+    .main { flex-direction: column-reverse; }
+    #panel { width: 100%; max-height: 45vh; border-top: 1px solid #dee2e6; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h1>🏥 SaludCerca <span class="fw-normal fs-6">— hospitales, clínicas y centros de todo el Perú</span></h1>
+    <span class="fs-6 opacity-75">38,786 establecimientos · datos oficiales SUSALUD + OSM</span>
+  </div>
+  <div class="main">
+    <div id="panel">
+      <label class="form-label fw-semibold mb-1">Buscar por nombre</label>
+      <div class="input-group input-group-sm mb-2">
+        <input id="txtBuscar" class="form-control" placeholder="Ej: clinica san pablo, hospital rebagliati...">
+        <button class="btn btn-primary" onclick="buscar()">Buscar</button>
+      </div>
+
+      <button class="btn btn-success w-100 mb-3" id="btnCerca" onclick="cercaDeMi()">
+        📍 Ver establecimientos cerca de mí
+      </button>
+
+      <label class="form-label fw-semibold mb-1">Filtrar resultados cercanos</label>
+      <div class="mb-2" id="chipsTipos"></div>
+      <label class="form-label fw-semibold mb-1">Radio</label>
+      <select id="selRadio" class="form-select form-select-sm mb-3" onchange="refrescarCerca()">
+        <option value="2">2 km</option>
+        <option value="5" selected>5 km</option>
+        <option value="10">10 km</option>
+        <option value="25">25 km</option>
+      </select>
+
+      <div id="resultados"><div class="text-muted small">Usa el buscador o activa tu ubicación para ver establecimientos en el mapa.</div></div>
+      <div id="rutaInfo" class="d-none"></div>
+    </div>
+    <div id="mapa"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const API = 'http://localhost:8080/api';
+const TIPOS = {
+  CLINICA:       { label: 'Clínica',    color: '#dc3545' },
+  HOSPITAL:      { label: 'Hospital',   color: '#084298' },
+  CENTRO_SALUD:  { label: 'C. de Salud',color: '#198754' },
+  POSTA:         { label: 'Posta',      color: '#fd7e14' },
+  POLICLINICO:   { label: 'Policlínico',color: '#0dcaf0' },
+  CONSULTORIO:   { label: 'Consultorio',color: '#6f42c1' },
+  LABORATORIO:   { label: 'Laboratorio',color: '#20c997' },
+};
+const seleccionados = new Set(['CLINICA','HOSPITAL','CENTRO_SALUD','POSTA']);
+
+const map = L.map('mapa').setView([-9.19, -75.02], 5);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  { attribution: '© OpenStreetMap · © CARTO', maxZoom: 18 }).addTo(map);
+const capa = L.layerGroup().addTo(map);
+
+// Chips de tipos
+const chips = document.getElementById('chipsTipos');
+Object.entries(TIPOS).forEach(([k, v]) => {
+  const b = document.createElement('button');
+  b.className = 'btn btn-sm chip ' + (seleccionados.has(k) ? 'btn-outline-primary active' : 'btn-outline-secondary');
+  b.textContent = v.label; b.dataset.tipo = k;
+  b.onclick = () => {
+    seleccionados.has(k) ? seleccionados.delete(k) : seleccionados.add(k);
+    b.classList.toggle('btn-outline-primary'); b.classList.toggle('active');
+    b.classList.toggle('btn-outline-secondary');
+    if (miUbicacion) refrescarCerca();
+  };
+  chips.appendChild(b);
+});
+
+let miUbicacion = null;
+let ultimoModo = null;
+let listaActual = [];
+let lineaRuta = null;
+
+function icono(tipo) {
+  const t = TIPOS[tipo] || { color: '#6c757d' };
+  return L.divIcon({ className: '', html:
+    `<div style="background:${t.color};width:14px;height:14px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid white;box-shadow:0 0 3px rgba(0,0,0,.4)"></div>`,
+    iconSize: [16,16], iconAnchor:[8,14], popupAnchor:[0,-12] });
+}
+
+function popup(e) {
+  const t = TIPOS[e.tipo];
+  return `<b>${e.nombre}</b><br>
+    ${t ? `<span style="color:${t.color}">●</span> ${t.label}` : e.tipo}
+    ${e.distanciaKm != null ? ` · <span class="dist">${e.distanciaKm} km</span>` : ''}<br>
+    ${e.direccion ? e.direccion + '<br>' : ''}
+    ${e.telefono ? '📞 ' + e.telefono + '<br>' : ''}
+    ${e.horario ? '🕐 ' + e.horario : ''}
+    ${e.abierto24h ? '<br>⏰ Abierto 24 horas' : ''}`;
+}
+
+async function json(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('API ' + r.status);
+  return r.json();
+}
+
+function pintar(lista, titulo) {
+  capa.clearLayers();
+  limpiarRuta();
+  listaActual = lista;
+  const res = document.getElementById('resultados');
+  document.getElementById('panel').scrollTop = 0;
+  if (!lista.length) { res.innerHTML = `<div class="text-muted small">Sin resultados.</div>`; return; }
+  const bounds = [];
+  let html = `<div class="small text-muted mb-2">${titulo} · ${lista.length} resultados</div>`;
+  lista.forEach((e, i) => {
+    if (e.latitud == null) return;
+    L.marker([e.latitud, e.longitud], { icon: icono(e.tipo) })
+      .bindPopup(popup(e)).addTo(capa);
+    bounds.push([e.latitud, e.longitud]);
+    const t = TIPOS[e.tipo] || { label: e.tipo, color: '#6c757d' };
+    html += `
+    <div class="card card-est mb-2 p-2" style="border-left-color:${t.color}" onclick="volar(${e.latitud},${e.longitud})">
+      <div class="d-flex justify-content-between align-items-start gap-1">
+        <div class="small fw-semibold">${e.nombre}</div>
+        ${e.distanciaKm != null ? `<span class="dist small">${e.distanciaKm} km</span>` : ''}
+      </div>
+      <div class="small text-muted">
+        <span class="badge bg-light text-dark border badge-tipo">${t.label}</span>
+        ${e.abierto24h ? '<span class="badge bg-success badge-tipo">24 h</span>' : ''}
+        ${[e.distrito, e.departamento].filter(Boolean).join(', ')}
+        ${e.telefono ? '· 📞 ' + e.telefono : ''}
+      </div>
+      <button class="btn btn-sm btn-outline-primary mt-1 py-0" onclick="event.stopPropagation(); rutaA(${i})">
+        🧭 Cómo llegar
+      </button>
+    </div>`;
+  });
+  res.innerHTML = html;
+  if (bounds.length === 1) map.setView(bounds[0], 15);
+  else if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+}
+
+function volar(lat, lon) { map.flyTo([lat, lon], 16); }
+
+async function rutaA(i) {
+  const dest = listaActual[i];
+  if (!dest || dest.latitud == null) return;
+  if (!miUbicacion) {
+    // Sin ubicación del usuario: usa el centro actual del mapa como origen
+    miUbicacion = [map.getCenter().lat, map.getCenter().lng];
+    L.marker(miUbicacion).addTo(map).bindPopup('📍 Origen (centro del mapa)');
+  }
+  const info = document.getElementById('rutaInfo');
+  info.className = 'alert alert-info py-1 px-2 small mt-2';
+  info.textContent = '⏳ Calculando ruta...';
+  try {
+    const r = await fetch(`${API}/ruta?latOrigen=${miUbicacion[0]}&lonOrigen=${miUbicacion[1]}&latDestino=${dest.latitud}&lonDestino=${dest.longitud}&costing=auto`);
+    if (!r.ok) throw new Error();
+    const ruta = await r.json();
+    limpiarRuta();
+    lineaRuta = L.polyline(ruta.geometria, { color: '#0d6efd', weight: 5, opacity: .8 })
+      .bindPopup(`Ruta: ${ruta.distanciaKm} km · ${ruta.minutosEta} min en auto`).addTo(capa);
+    map.fitBounds(lineaRuta.getBounds(), { padding: [40, 40] });
+    info.className = 'alert alert-success py-1 px-2 small mt-2';
+    info.innerHTML = `🧭 <b>${ruta.distanciaKm} km</b> · ⏱️ <b>${ruta.minutosEta} min</b> en auto hasta <b>${dest.nombre}</b>`;
+  } catch (err) {
+    info.className = 'alert alert-warning py-1 px-2 small mt-2';
+    info.textContent = '❌ No se pudo calcular la ruta (¿motor de rutas activo?)';
+  }
+}
+
+function limpiarRuta() {
+  if (lineaRuta) { capa.removeLayer(lineaRuta); lineaRuta = null; }
+}
+
+async function buscar() {
+  const q = document.getElementById('txtBuscar').value.trim();
+  if (!q) return;
+  ultimoModo = null;
+  res('⏳ Buscando...');
+  try { pintar(await json(`${API}/establecimientos/buscar?q=${encodeURIComponent(q)}&limite=40`), `"${q}"`); }
+  catch (err) { res('❌ Error consultando la API'); }
+}
+
+async function cercaDeMi() {
+  const btn = document.getElementById('btnCerca');
+  if (!navigator.geolocation) { alert('Tu navegador no soporta geolocalización'); return; }
+  btn.disabled = true; btn.textContent = '⏳ Obteniendo ubicación...';
+  navigator.geolocation.getCurrentPosition(async pos => {
+    miUbicacion = [pos.coords.latitude, pos.coords.longitude];
+    btn.textContent = '📍 Cerca de mí'; btn.disabled = false;
+    L.marker(miUbicacion).addTo(map).bindPopup('📍 Estás aquí');
+    refrescarCerca();
+  }, err => {
+    btn.textContent = '📍 Cerca de mí'; btn.disabled = false;
+    // Fallback demo: Lima centro
+    miUbicacion = [-12.046, -77.03];
+    refrescarCerca();
+  }, { timeout: 8000 });
+}
+
+async function refrescarCerca() {
+  if (!miUbicacion) return;
+  const radio = document.getElementById('selRadio').value;
+  const tipos = [...seleccionados].join(',');
+  res('⏳ Buscando cerca...');
+  try {
+    const lista = await json(`${API}/establecimientos/cercanos?lat=${miUbicacion[0]}&lon=${miUbicacion[1]}&radioKm=${radio}${tipos ? '&tipos=' + tipos : ''}&limite=50`);
+    pintar(lista.sort((a,b)=>a.distanciaKm-b.distanciaKm), `En ${radio} km`);
+  } catch (err) { res('❌ Error consultando la API'); }
+}
+
+function res(msg) { document.getElementById('resultados').innerHTML = `<div class="text-muted small">${msg}</div>`; }
+
+document.getElementById('txtBuscar').addEventListener('keydown', e => { if (e.key === 'Enter') buscar(); });
+</script>
+</body>
+</html>
