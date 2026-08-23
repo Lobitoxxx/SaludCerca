@@ -40,5 +40,39 @@ services:
       retries: 15
     restart: unless-stopped
 
+  # ============================================================================
+  # API backend (Java 17 + Spring Boot): catálogo nacional, despacho y rutas.
+  # El jar se compila con Maven local (backend/mvnw package) antes del build.
+  # ============================================================================
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: saludcerca-api
+    environment:
+      POSTGRES_URL: jdbc:postgresql://db:5432/saludcerca
+      VALHALLA_URL: http://valhalla:8002
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================================
+  # Motor de rutas (ADR-005): Valhalla self-hosted sobre grafo OSM Perú.
+  # Los tiles se construyen UNA VEZ con scripts/valhalla-build.ps1 a partir de
+  # data/osm/peru-latest.osm.pbf; este servicio solo sirve la API HTTP :8002.
+  # ============================================================================
+  valhalla:
+    image: ghcr.io/valhalla/valhalla:latest
+    container_name: saludcerca-valhalla
+    command: ["valhalla_service", "/data/valhalla/config.json", "2"]
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./valhalla_data:/data/valhalla
+    restart: unless-stopped
+
 volumes:
   pgdata:
